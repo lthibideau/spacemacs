@@ -10,88 +10,58 @@
 ;;
 ;;; License: GPLv3
 
-(defvar colors-packages
+(setq colors-packages
   '(
+    ;; not working well for now
+    ;; rainbow-blocks
     rainbow-identifiers
-    )
-  "List of all packages to install and/or initialize. Built-in packages
-which require an initialization must be listed explicitly in the list.")
+    rainbow-mode
+    ))
+
+;; (defun colors/init-rainbow-blocks ()
+;;   (use-package rainbow-blocks
+;;     :disabled t
+;;     :init (add-hook 'emacs-lisp-mode-hook 'rainbow-blocks-mode)))
 
 (defun colors/init-rainbow-identifiers ()
   (use-package rainbow-identifiers
+    :if colors-enable-rainbow-identifiers
     :commands rainbow-identifiers-mode
     :init
-    (progn 
+    (progn
       (setq rainbow-identifiers-choose-face-function 'rainbow-identifiers-cie-l*a*b*-choose-face
             rainbow-identifiers-cie-l*a*b*-saturation 100
             rainbow-identifiers-cie-l*a*b*-lightness 40
             ;; override theme faces
             rainbow-identifiers-faces-to-override '(highlight-quoted-symbol
+                                                    font-lock-keyword-face
+                                                    font-lock-function-name-face
                                                     font-lock-variable-name-face))
 
-      (defun colors/toggle-rainbow-indentifiers ()
-        "Toggle rainbow identifiers."
-        (interactive)
-        (if (and (boundp 'rainbow-identifiers-mode)
-                 (symbol-value rainbow-identifiers-mode))
-            (progn
-              (colors//tweak-theme-colors-font-lock t)
-              (rainbow-identifiers-mode -1))
-          (colors//tweak-theme-colors-font-lock)
-          (rainbow-identifiers-mode)))
-      (evil-leader/set-key "tCi" 'colors/toggle-rainbow-indentifiers)
+      (spacemacs|add-toggle rainbow-identifier-globally
+                            :status rainbow-identifiers-mode
+                            :on (rainbow-identifiers-mode)
+                            :off (rainbow-identifiers-mode -1)
+                            :documentation "Colorize identifiers globally."
+                            :evil-leader "tCi")
 
-      (add-to-hooks 'rainbow-identifiers-mode '(prog-mode-hook
-                                                erlang-mode-hook))
-
-      (defun colors//tweak-theme-colors-font-lock (&optional restore)
-        "Nilify some font locks. If RESTORE in non nil the font locks are
- restored."
-        ;; To make the variables stand out, keyword coloring is disabled
-        (cond
-         (restore
-          (set-attributes-from-alist
-           'font-lock-function-name-face original-font-lock-function-name-face-attributes)
-          (set-attributes-from-alist
-           'font-lock-keyword-face original-font-lock-keyword-face-attributes))
-         (t
-          (set-face-attribute 'font-lock-function-name-face nil
-                              :foreground nil :slant 'normal :weight 'normal)
-          (set-face-attribute 'font-lock-keyword-face nil
-                              :foreground nil :slant 'normal :weight 'bold)))
-        (font-lock-fontify-buffer))
+      (add-hook 'prog-mode-hook 'rainbow-identifiers-mode)
 
       (defun colors//tweak-theme-colors (theme)
-        "Tweak color themes by adjusting rainbow-identifiers colors settings an by
-disabling some faces in order to make colored identifiers stand out."
+        "Tweak color themes by adjusting rainbow-identifiers."
         (interactive)
         ;; tweak the saturation and lightness of identifier colors
-        (pcase theme
-          (`leuven (setq rainbow-identifiers-cie-l*a*b*-saturation 100
-                                  rainbow-identifiers-cie-l*a*b*-lightness 40))
-          (`monokai (setq rainbow-identifiers-cie-l*a*b*-saturation 55
-                          rainbow-identifiers-cie-l*a*b*-lightness 60))
-          (`solarized-dark (setq rainbow-identifiers-cie-l*a*b*-saturation 85
-                                 rainbow-identifiers-cie-l*a*b*-lightness 65))
-          (`solarized-light (setq rainbow-identifiers-cie-l*a*b*-saturation 100
-                                  rainbow-identifiers-cie-l*a*b*-lightness 40))
-          (`zenburn (setq rainbow-identifiers-cie-l*a*b*-saturation 40
-                          rainbow-identifiers-cie-l*a*b*-lightness 65))
-          (_ (setq rainbow-identifiers-cie-l*a*b*-saturation 80
-                   rainbow-identifiers-cie-l*a*b*-lightness 45)))
-        ;; backup to original font locks
-        (let ((frame (selected-frame)))
-          (setq original-font-lock-function-name-face-attributes
-                (face-all-attributes font-lock-function-name-face frame))
-          (setq original-font-lock-keyword-face-attributes
-                (face-all-attributes font-lock-keyword-face frame)))
-        ;; tweak the font locks
-        (colors//tweak-theme-colors-font-lock)))
-    (colors//tweak-theme-colors spacemacs-cur-theme)
+        (let ((sat&light (assq theme colors-theme-identifiers-sat&light)))
+          (if sat&light
+              (setq rainbow-identifiers-cie-l*a*b*-saturation (cadr sat&light)
+                    rainbow-identifiers-cie-l*a*b*-lightness (caddr sat&light))
+            (setq rainbow-identifiers-cie-l*a*b*-saturation 80
+                  rainbow-identifiers-cie-l*a*b*-lightness 45)))))
+    (colors//tweak-theme-colors spacemacs--cur-theme)
 
     (defadvice spacemacs/post-theme-init (after colors/post-theme-init activate)
       "Adjust lightness and brightness of rainbow-identifiers on post theme init."
-      (colors//tweak-theme-colors spacemacs-cur-theme))
+      (colors//tweak-theme-colors spacemacs--cur-theme))
 
     :config
     (progn
@@ -119,7 +89,7 @@ Press any other key to exit." component (eval var) component component)))
            (define-key map (kbd "-") down-func)
            (define-key map (kbd "=") reset-func)
            map) t)
-           (colors//change-color-mini-mode-doc component)) 
+           (colors//change-color-mini-mode-doc component))
 
       (defun colors/start-change-color-saturation ()
         "Initiate the overlay map to change the saturation."
@@ -172,3 +142,9 @@ Press any other key to exit." component (eval var) component component)))
       ;; key bindings
       (evil-leader/set-key "Cis" 'colors/start-change-color-saturation)
       (evil-leader/set-key "Cil" 'colors/start-change-color-lightness))))
+
+(defun colors/init-rainbow-mode ()
+  (use-package rainbow-mode
+    :commands rainbow-mode
+    :init (evil-leader/set-key "tCc" 'rainbow-mode)
+    :config (spacemacs|hide-lighter rainbow-mode)))

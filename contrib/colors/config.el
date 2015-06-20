@@ -10,12 +10,28 @@
 ;;
 ;;; License: GPLv3
 
-;; ---------------------------------------------------------------------------
-;; Prefixes 
-;; ---------------------------------------------------------------------------
+;; Variables
 
-(setq spacemacs/key-binding-prefixes '(("C" .  "colors")
-                                       ("Ci" . "colors-identifiers")
-                                       ("tC" . "toggles-colors")))
-(mapc (lambda (x) (spacemacs/declare-prefix (car x) (cdr x)))
-      spacemacs/key-binding-prefixes)
+(defvar colors-enable-rainbow-identifiers nil
+  "If non nil the `rainbow-identifers' package is enabled.")
+
+(defvar colors-enable-nyan-cat-progress-bar nil
+  "If non nil all nyan cat packges are enabled (for now only `nyan-mode').")
+
+(defvar colors-theme-identifiers-sat&light
+  '((jazz . (50 55))
+    (gotham . (45 60))
+    (leuven . (100 40))
+    (material . (95 105))
+    (monokai . (55 60))
+    (solarized-dark . (65 55))
+    (solarized-light . (60 55))
+    (zenburn . (40 65)))
+  "alist of theme symbols and pair of saturation and lightness values.")
+
+;; Command prefixes
+
+(when colors-enable-rainbow-identifiers
+  (setq colors/key-binding-prefixes '(("Ci" . "colors-identifiers")))
+  (mapc (lambda (x) (spacemacs/declare-prefix (car x) (cdr x)))
+        colors/key-binding-prefixes))

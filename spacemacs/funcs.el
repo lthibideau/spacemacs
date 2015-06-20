@@ -67,8 +67,10 @@
   "Declare a prefix PREFIX. PREFIX is a string describing
 a key sequence. NAME is a symbol name used as the prefix command."
   (let ((command (intern (concat spacemacs/prefix-command-string name))))
-    (define-prefix-command command)
-    (evil-leader/set-key prefix command)))
+    ;; define the prefix command only if it does not already exist
+    (unless (lookup-key evil-leader--default-map prefix)
+      (define-prefix-command command)
+      (evil-leader/set-key prefix command))))
 
 ;; Waiting to fix the issue with guide-key before reactivating/updating this
 ;; function
@@ -80,49 +82,23 @@ a key sequence. NAME is a symbol name used as the prefix command."
 ;;     (define-prefix-command command)
 ;;     (evil-leader/set-key-for-mode mode prefix command)))
 
-(defun spacemacs/activate-evil-leader-for-maps (map-list)
-  "Remove the evil-leader binding from all the maps in MAP-LIST."
-  (mapc (lambda (x)
-          (eval `(define-key ,x (kbd evil-leader/leader)
-                   evil-leader--default-map)))
-        map-list))
-
-(defun spacemacs/activate-evil-leader-for-map (map)
-  "Remove the evil-leader binding from the passed MAP."
-  (spacemacs/activate-evil-leader-for-maps `(,map)))
-
 (defun spacemacs/activate-major-mode-leader ()
   "Bind major mode key map to `dotspacemacs-major-mode-leader-key'."
   (setq mode-map (cdr (assoc major-mode evil-leader--mode-maps)))
   (when mode-map
     (setq major-mode-map (lookup-key mode-map (kbd "m")))
-    (define-key evil-normal-state-local-map
-      (kbd dotspacemacs-major-mode-leader-key) major-mode-map)
-    (define-key evil-motion-state-local-map
-      (kbd dotspacemacs-major-mode-leader-key) major-mode-map)))
-
-(defmacro spacemacs|evilify (map &rest body)
-  "Add `hjkl' navigation, search and visual state to MAP and set additional
-bindings contained in BODY."
-  `(evil-add-hjkl-bindings ,map 'emacs
-    "/" 'evil-search-forward
-    "n" ',(lookup-key evil-motion-state-map "n")
-    "N" ',(lookup-key evil-motion-state-map "N")
-    "v" 'evil-visual-char
-    "V" 'evil-visual-line
-    (kbd "C-v") 'evil-visual-block
-    ,@body))
-
-;; From http://stackoverflow.com/a/18796138
-;; Cycle through this set of themes
-(defvar spacemacs-themes '(solarized-light
-                           solarized-dark
-                           leuven
-                           monokai
-                           zenburn)
-  "Themes officially supported by spacemacs.")
-(defvar spacemacs-cur-theme (pop spacemacs-themes)
-  "Current spacemacs theme.")
+    (mapc (lambda (s)
+            (eval `(define-key
+                     ,(intern (format "evil-%S-state-local-map" s))
+                     ,(kbd dotspacemacs-major-mode-leader-key)
+                     major-mode-map)))
+          '(normal motion))
+    (mapc (lambda (s)
+            (eval `(define-key
+                     ,(intern (format "evil-%S-state-local-map" s))
+                     ,(kbd dotspacemacs-major-mode-emacs-leader-key)
+                     major-mode-map)))
+          '(emacs insert normal motion visual))))
 
 (defun spacemacs/split-and-new-line ()
   "Split a quoted string or s-expression and insert a new line with
@@ -142,37 +118,6 @@ auto-indent."
   (interactive)
   (push-mark (point))
   (evil-end-of-line))
-
-(defun spacemacs/cycle-spacemacs-theme ()
-  "Cycle through themes defined in spacemacs-themes."
-  (interactive)
-  (when  spacemacs-cur-theme
-    (disable-theme  spacemacs-cur-theme)
-    (setq spacemacs-themes (append spacemacs-themes
-                                   (list spacemacs-cur-theme))))
-  (setq  spacemacs-cur-theme (pop spacemacs-themes))
-  (message "Loading theme %s..." spacemacs-cur-theme)
-  (load-theme spacemacs-cur-theme t))
-
-(defadvice load-theme (after spacemacs/load-theme-adv activate)
-  "Perform post load processing."
-  (let ((theme (ad-get-arg 0)))
-    (setq spacemacs-cur-theme theme)
-    (spacemacs/post-theme-init theme)))
-
-(defun spacemacs/post-theme-init (theme)
-  " Some processing that needs to be done when the current theme has been
-changed to THEME."
-  (interactive)
-      ;; Define a face for each state
-  (if (fboundp 'spacemacs/set-state-faces)
-      (spacemacs/set-state-faces))
-  (if (fboundp 'spacemacs/set-flycheck-mode-line-faces)
-      (spacemacs/set-flycheck-mode-line-faces))
-  (if (fboundp 'spacemacs/set-new-version-lighter-mode-line-faces)
-      (spacemacs/set-new-version-lighter-mode-line-faces))
-  (if (fboundp 'powerline-reset)
-      (powerline-reset)))
 
 ;; insert one or several line below without changing current evil state
 (defun evil-insert-line-below (count)
@@ -198,6 +143,106 @@ the current state and point position."
       (sp-newline)
       (setq counter (1- counter)))))
 
+;; from Prelude
+;; TODO: dispatch these in the layers
+(defvar spacemacs-indent-sensitive-modes
+  '(coffee-mode
+    python-mode
+    slim-mode
+    haml-mode
+    yaml-mode
+    makefile-mode
+    makefile-gmake-mode
+    makefile-imake-mode
+    makefile-bsdmake-mode)
+  "Modes for which auto-indenting is suppressed.")
+
+(defcustom spacemacs-yank-indent-threshold 1000
+  "Threshold (# chars) over which indentation does not automatically occur."
+  :type 'number
+  :group 'spacemacs)
+
+
+(defun spacemacs/indent-region-or-buffer ()
+  "Indent a region if selected, otherwise the whole buffer."
+  (interactive)
+  (unless (member major-mode spacemacs-indent-sensitive-modes)
+    (save-excursion
+      (if (region-active-p)
+          (progn
+            (indent-region (region-beginning) (region-end))
+            (message "Indented selected region."))
+        (progn
+          (evil-indent (point-min) (point-max))
+          (message "Indented buffer.")))
+      (whitespace-cleanup))))
+
+;; linum gutter helpers
+(defvar *linum-mdown-line* nil
+  "Define persistent variable for linum selection")
+
+(defun spacemacs/line-at-click ()
+  "Determine the visual line at click"
+  (save-excursion
+    (let ((click-y (cddr (mouse-position)))
+          (debug-on-error t)
+          (line-move-visual t))
+      (goto-char (window-start))
+      (next-line (1- click-y))
+      (1+ (line-number-at-pos))
+      )))
+
+(defun spacemacs/md-select-linum (event)
+  "Set point as *linum-mdown-line*"
+  (interactive "e")
+  (mouse-select-window event)
+  (goto-line (spacemacs/line-at-click))
+  (set-mark (point))
+  (setq *linum-mdown-line*
+        (line-number-at-pos)))
+
+(defun spacemacs/mu-select-linum ()
+  "Select code block between point and *linum-mdown-line*"
+  (interactive)
+  (when *linum-mdown-line*
+    (let (mu-line)
+      (setq mu-line (spacemacs/line-at-click))
+      (goto-line (max *linum-mdown-line* mu-line))
+      (set-mark (line-end-position))
+      (goto-line (min *linum-mdown-line* mu-line))
+      (setq *linum-mdown*
+            nil))))
+
+(defun spacemacs/select-current-block ()
+  "Select the current block of text between blank lines."
+  (interactive)
+  (let (p1 p2)
+    (progn
+      (if (re-search-backward "\n[ \t]*\n" nil "move")
+          (progn (re-search-forward "\n[ \t]*\n")
+                 (setq p1 (point)))
+        (setq p1 (point)))
+      (if (re-search-forward "\n[ \t]*\n" nil "move")
+          (progn (re-search-backward "\n[ \t]*\n")
+                 (setq p2 (point)))
+        (setq p2 (point))))
+    (set-mark p1)))
+
+;; eval lisp helpers
+(defun spacemacs/eval-region ()
+  (interactive)
+  (eval-region (region-beginning) (region-end))
+  (evil-normal-state))
+
+;; idea from http://www.reddit.com/r/emacs/comments/312ge1/i_created_this_function_because_i_was_tired_of/
+(defun spacemacs/eval-current-form ()
+  "Looks for the current def* or set* command then evaluates, unlike `eval-defun', does not go to topmost function"
+  (interactive)
+  (save-excursion
+    (search-backward-regexp "(def\\|(set")
+    (forward-list)
+    (call-interactively 'eval-last-sexp)))
+
 ;; from magnars
 (defun eval-and-replace ()
   "Replace the preceding sexp with its value."
@@ -213,10 +258,11 @@ the current state and point position."
 (defun toggle-maximize-buffer ()
   "Maximize buffer"
   (interactive)
-  (if (= 1 (length (window-list)))
+  (if (and (= 1 (length (window-list)))
+           (assoc'_ register-alist))
       (jump-to-register '_)
     (progn
-      (set-register '_ (list (current-window-configuration)))
+      (window-configuration-to-register '_)
       (delete-other-windows))))
 
 (defun toggle-maximize-centered-buffer ()
@@ -275,38 +321,72 @@ the current state and point position."
 
 ;; from magnars modified by ffevotte for dedicated windows support
 (defun rotate-windows (count)
- "Rotate your windows.
+  "Rotate your windows.
 Dedicated windows are left untouched. Giving a negative prefix
 argument takes the kindows rotate backwards."
- (interactive "p")
- (let* ((non-dedicated-windows (remove-if 'window-dedicated-p (window-list)))
-        (num-windows (length non-dedicated-windows))
-        (i 0)
-        (step (+ num-windows count)))
-   (cond ((not (> num-windows 1))
-          (message "You can't rotate a single window!"))
-         (t
-          (dotimes (counter (- num-windows 1))
-            (let* ((next-i (% (+ step i) num-windows))
+  (interactive "p")
+  (let* ((non-dedicated-windows (remove-if 'window-dedicated-p (window-list)))
+         (num-windows (length non-dedicated-windows))
+         (i 0)
+         (step (+ num-windows count)))
+    (cond ((not (> num-windows 1))
+           (message "You can't rotate a single window!"))
+          (t
+           (dotimes (counter (- num-windows 1))
+             (let* ((next-i (% (+ step i) num-windows))
 
-                   (w1 (elt non-dedicated-windows i))
-                   (w2 (elt non-dedicated-windows next-i))
+                    (w1 (elt non-dedicated-windows i))
+                    (w2 (elt non-dedicated-windows next-i))
 
-                   (b1 (window-buffer w1))
-                   (b2 (window-buffer w2))
+                    (b1 (window-buffer w1))
+                    (b2 (window-buffer w2))
 
-                   (s1 (window-start w1))
-                   (s2 (window-start w2)))
-              (set-window-buffer w1 b2)
-              (set-window-buffer w2 b1)
-              (set-window-start w1 s2)
-              (set-window-start w2 s1)
-              (setq i next-i)))))))
+                    (s1 (window-start w1))
+                    (s2 (window-start w2)))
+               (set-window-buffer w1 b2)
+               (set-window-buffer w2 b1)
+               (set-window-start w1 s2)
+               (set-window-start w2 s1)
+               (setq i next-i)))))))
 
 (defun rotate-windows-backward (count)
- "Rotate your windows backward."
+  "Rotate your windows backward."
   (interactive "p")
   (rotate-windows (* -1 count)))
+
+(defun spacemacs/useless-buffer-p (buffer)
+  "Determines if a buffer is useful."
+  (let ((buf-paren-major-mode (get (with-current-buffer buffer
+                                     major-mode)
+                                   'derived-mode-parent))
+        (buf-name (buffer-name buffer)))
+    ;; first find if useful buffer exists, if so returns nil and don't check for
+    ;; useless buffers. If no useful buffer is found, check for useless buffers.
+    (unless (cl-loop for regexp in spacemacs-useful-buffers-regexp do
+                     (when (or (eq buf-paren-major-mode 'comint-mode)
+                               (string-match regexp buf-name))
+                       (return t)))
+      (cl-loop for regexp in spacemacs-useless-buffers-regexp do
+               (when (string-match regexp buf-name)
+                 (return t))))))
+
+(defun spacemacs/next-useful-buffer ()
+  "Switch to the next buffer and avoid special buffers."
+  (interactive)
+  (let ((start-buffer (current-buffer)))
+    (next-buffer)
+    (while (and (spacemacs/useless-buffer-p (current-buffer))
+                (not (eq (current-buffer) start-buffer)))
+      (next-buffer))))
+
+(defun spacemacs/previous-useful-buffer ()
+  "Switch to the previous buffer and avoid special buffers."
+  (interactive)
+  (let ((start-buffer (current-buffer)))
+    (previous-buffer)
+    (while (and (spacemacs/useless-buffer-p (current-buffer))
+                (not (eq (current-buffer) start-buffer)))
+      (previous-buffer))))
 
 ;; from magnars
 (defun rename-current-buffer-file ()
@@ -320,6 +400,9 @@ argument takes the kindows rotate backwards."
         (cond ((get-buffer new-name)
                (error "A buffer named '%s' already exists!" new-name))
               (t
+               (let ((dir (file-name-directory new-name)))
+                 (when (and (not (file-exists-p dir)) (yes-or-no-p (format "Create directory '%s'?" dir)))
+                   (make-directory dir t)))
                (rename-file filename new-name 1)
                (rename-buffer new-name)
                (set-visited-file-name new-name)
@@ -436,6 +519,12 @@ argument takes the kindows rotate backwards."
   (interactive)
   (find-file-existing (dotspacemacs/location)))
 
+(defun ediff-dotfile-and-template ()
+  "ediff the current `dotfile' with the template"
+  (interactive)
+  (ediff-files (dotspacemacs/location)
+               (concat dotspacemacs-template-directory ".spacemacs.template")))
+
 (defun find-spacemacs-file ()
   (interactive)
   "Edit the `file' in the spacemacs base directory, in the current window."
@@ -448,20 +537,19 @@ argument takes the kindows rotate backwards."
 
 ;; From http://xugx2007.blogspot.ca/2007/06/benjamin-rutts-emacs-c-development-tips.html
 (setq compilation-finish-function
-   (lambda (buf str)
+      (lambda (buf str)
 
-     (if (or (string-match "exited abnormally" str)
-            (string-match "FAILED" (buffer-string)))
+        (if (or (string-match "exited abnormally" str)
+                (string-match "FAILED" (buffer-string)))
 
-         ;;there were errors
-         (message "There were errors. SPC-e-n to visit.")
-       (unless (or (string-match "Grep finished" (buffer-string))
-                  (string-match "Ag finished" (buffer-string))
-                  (string-match "nosetests" (buffer-name)))
+            ;; there were errors
+            (message "There were errors. SPC-e-n to visit.")
+          (unless (or (string-match "Grep finished" (buffer-string))
+                      (string-match "Ag finished" (buffer-string))
+                      (string-match "nosetests" (buffer-name)))
 
-         ;;no errors, make the compilation window go away in 0.5 seconds
-         (delete-windows-on buf)
-         (message "compilation ok.")))))
+            ;; no errors
+            (message "compilation ok.")))))
 
 ;; from https://gist.github.com/timcharper/493269
 (defun split-window-vertically-and-switch ()
@@ -517,61 +605,6 @@ argument takes the kindows rotate backwards."
     (switch-to-buffer this-buffer) ;; why? Some ido commands, such as textmate.el's textmate-goto-symbol don't switch the current buffer
     result))
 
-
-;; from https://gist.github.com/cofi/3013327
-(defun cofi/helm-flyspell-correct ()
-    "Use helm for flyspell correction.
-Adapted from `flyspell-correct-word-before-point'."
-    (interactive)
-    ;; use the correct dictionary
-    (flyspell-accept-buffer-local-defs)
-    (let ((cursor-location (point))
-          (word (flyspell-get-word))
-          (opoint (point)))
-      (if (consp word)
-          (let ((start (car (cdr word)))
-                (end (car (cdr (cdr word))))
-                (word (car word))
-                poss ispell-filter)
-            ;; now check spelling of word.
-            (ispell-send-string "%\n")	;put in verbose mode
-            (ispell-send-string (concat "^" word "\n"))
-            ;; wait until ispell has processed word
-            (while (progn
-                     (accept-process-output ispell-process)
-                     (not (string= "" (car ispell-filter)))))
-            ;; Remove leading empty element
-            (setq ispell-filter (cdr ispell-filter))
-            ;; ispell process should return something after word is sent.
-            ;; Tag word as valid (i.e., skip) otherwise
-            (or ispell-filter
-               (setq ispell-filter '(*)))
-            (if (consp ispell-filter)
-                (setq poss (ispell-parse-output (car ispell-filter))))
-            (cond
-             ((or (eq poss t) (stringp poss))
-              ;; don't correct word
-              t)
-             ((null poss)
-              ;; ispell error
-              (error "Ispell: error in Ispell process"))
-             (t
-              ;; The word is incorrect, we have to propose a replacement.
-              (flyspell-do-correct (helm-comp-read "Correction: "
-                                                   (append
-                                                    (third poss)
-                                                    '(("Save word"        . save)
-                                                      ("Accept (session)" . session)
-                                                      ("Accept (buffer)"  . buffer)))
-                                                   :name (format "%s [%s]" word (or ispell-local-dictionary
-                                                                                   ispell-dictionary
-                                                                                   "Default"))
-                                                   :must-match t
-                                                   :alistp t)
-
-                                   poss word cursor-location start end opoint)))
-            (ispell-pdict-save t)))))
-
 (defun set-google-translate-languages (source target)
   "Set source language for google translate.
 For instance pass En as source for english."
@@ -612,6 +645,30 @@ For instance pass En as source for english."
   (let ((newbuf (generate-new-buffer-name "untitled")))
     (switch-to-buffer newbuf)))
 
+(defun spacemacs/home ()
+  "Go to home Spacemacs buffer"
+  (interactive)
+  (switch-to-buffer "*spacemacs*")
+  )
+
+(defun spacemacs/insert-line-above-no-indent (count)
+  (interactive "p")
+  (save-excursion
+    (evil-previous-line)
+    (evil-move-end-of-line)
+    (while (> count 0)
+      (insert "\n")
+      (setq count (1- count)))))
+
+(defun spacemacs/insert-line-below-no-indent (count)
+  "Insert a new line below with no identation."
+  (interactive "p")
+  (save-excursion
+    (evil-move-end-of-line)
+    (while (> count 0)
+      (insert "\n")
+      (setq count (1- count)))))
+
 ;; from https://github.com/gempesaw/dotemacs/blob/emacs/dg-defun.el
 (defun kill-matching-buffers-rudely (regexp &optional internal-too)
   "Kill buffers whose name matches the specified REGEXP. This
@@ -631,32 +688,49 @@ kill internal buffers too."
 (defvar spacemacs-really-kill-emacs nil
   "prevent window manager close from closing instance.")
 
+(defun spacemacs-persistent-server-running-p ()
+  "Requires spacemacs-really-kill-emacs to be toggled and
+dotspacemacs-persistent-server to be t"
+  (and (fboundp 'server-running-p)
+       (server-running-p)
+       dotspacemacs-persistent-server))
+
 (defadvice kill-emacs (around spacemacs-really-exit activate)
   "Only kill emacs if a prefix is set"
-  (if (or spacemacs-really-kill-emacs (not dotspacemacs-persistent-server))
-      ad-do-it)
-  (spacemacs/frame-killer))
+  (if (and (not spacemacs-really-kill-emacs)
+           (spacemacs-persistent-server-running-p))
+      (spacemacs/frame-killer)
+    ad-do-it))
 
 (defadvice save-buffers-kill-emacs (around spacemacs-really-exit activate)
   "Only kill emacs if a prefix is set"
   (if (or spacemacs-really-kill-emacs (not dotspacemacs-persistent-server))
-      ad-do-it)
-  (spacemacs/frame-killer))
+      ad-do-it
+    (spacemacs/frame-killer)))
 
 (defun spacemacs/save-buffers-kill-emacs ()
+  "Save all changed buffers and exit Spacemacs"
   (interactive)
   (setq spacemacs-really-kill-emacs t)
   (save-buffers-kill-emacs))
 
 (defun spacemacs/kill-emacs ()
+  "Lose all changes and exit Spacemacs"
   (interactive)
   (setq spacemacs-really-kill-emacs t)
   (kill-emacs))
 
-(defun spacemacs/frame-killer ()
-  "Exit server buffers and hide the main Emacs window"
+(defun spacemacs/prompt-kill-emacs ()
+  "Prompt to save changed buffers and exit Spacemacs"
   (interactive)
-  (server-edit)
+  (setq spacemacs-really-kill-emacs t)
+  (save-some-buffers)
+  (kill-emacs))
+
+(defun spacemacs/frame-killer ()
+  "Kill server buffer and hide the main Emacs window"
+  (interactive)
+  (server-kill-buffer)
   (make-frame-invisible nil 1))
 
 ;; A small minor mode to use a big fringe
@@ -719,100 +793,6 @@ toggling fullscreen."
 		 'maximized)
 	   'fullboth)))))
 
-;;; begin scale font micro-state
-
-(defun spacemacs/scale-font-size-overlay-map ()
-  "Set a temporary overlay map to easily change the font size."
-  (set-temporary-overlay-map
-   (let ((map (make-sparse-keymap)))
-     (define-key map (kbd "+") 'spacemacs/scale-up-font)
-     (define-key map (kbd "-") 'spacemacs/scale-down-font)
-     (define-key map (kbd "=") 'spacemacs/reset-font-size)
-     map) t))
-
-(defun spacemacs/font-scaling-micro-state-doc ()
-  "Display a short documentation in the mini buffer."
-  (echo "Scale Font micro-state:
-  + to scale up
-  - to scale down
-  = to reset
-Press any other key to exit."))
-
-(defun spacemacs/scale-up-or-down-font-size (direction)
-  "Scale the font. If DIRECTION is positive or zero the font is scaled up,
-otherwise it is scaled down."
-  (interactive)
-  (let ((scale 0.5))
-    (if (eq direction 0)
-        (text-scale-set 0)
-      (if (< direction 0)
-          (text-scale-decrease scale)
-        (text-scale-increase scale))))
-  (spacemacs/scale-font-size-overlay-map)
-  (spacemacs/font-scaling-micro-state-doc))
-
-(defun spacemacs/scale-up-font ()
-  "Scale up the font."
-  (interactive)
-  (spacemacs/scale-up-or-down-font-size 1))
-
-(defun spacemacs/scale-down-font ()
-  "Scale up the font."
-  (interactive)
-  (spacemacs/scale-up-or-down-font-size -1))
-
-(defun spacemacs/reset-font-size ()
-  "Reset the font size."
-  (interactive)
-  (spacemacs/scale-up-or-down-font-size 0))
-
-;;; end scale font micro-state
-
-;;; begin resize window micro-state
-
-(defun spacemacs//resize-window-micro-state-doc ()
-  (echo (format
-         "[%sx%s] Resize window: (H/L) shrink/enlarge horizontally, (J/K) shrink/enlarge vertically"
-         (window-total-width) (window-total-height))))
-
-(defun spacemacs/resize-window-overlay-map ()
-  "Set a temporary overlay map to easily resize a window."
-  (interactive)
-  (set-temporary-overlay-map
-   (let ((map (make-sparse-keymap)))
-     (define-key map (kbd "H") 'spacemacs/shrink-window-horizontally)
-     (define-key map (kbd "J") 'spacemacs/shrink-window)
-     (define-key map (kbd "K") 'spacemacs/enlarge-window)
-     (define-key map (kbd "L") 'spacemacs/enlarge-window-horizontally)
-     map) t)
-  (spacemacs//resize-window-micro-state-doc))
-
-(defun spacemacs/shrink-window-horizontally (delta)
-  "Wrap `spacemacs/shrink-window-horizontally'."
-  (interactive "p")
-  (shrink-window delta t)
-  (spacemacs/resize-window-overlay-map))
-
-(defun spacemacs/shrink-window (delta)
-  "Wrap `spacemacs/shrink-window'."
-  (interactive "p")
-  (shrink-window delta)
-  (spacemacs/resize-window-overlay-map))
-
-(defun spacemacs/enlarge-window (delta)
-  "Wrap `spacemacs/enlarge-window'."
-  (interactive "p")
-  (enlarge-window delta)
-  (spacemacs/resize-window-overlay-map))
-
-(defun spacemacs/enlarge-window-horizontally (delta)
-  "Wrap `spacemacs/enlarge-window-horizontally'."
-  (interactive "p")
-  (enlarge-window delta t)
-  (spacemacs/resize-window-overlay-map))
-
-;;; end resize window micro-state
-
 (defmacro spacemacs|diminish (mode unicode &optional ascii)
   "Diminish MODE name in mode line to UNICODE or ASCII depending on the value
 `dotspacemacs-mode-line-unicode-symbols'.
@@ -826,6 +806,18 @@ If ASCII si not provided then UNICODE is used instead."
 (defmacro spacemacs|hide-lighter (mode)
   "Diminish MODE name in mode line to LIGHTER."
   `(eval-after-load 'diminish '(diminish ',mode)))
+
+;; taken from Prelude: https://github.com/bbatsov/prelude
+(defmacro spacemacs|advise-commands (advice-name commands class &rest body)
+  "Apply advice named ADVICE-NAME to multiple COMMANDS.
+The body of the advice is in BODY."
+  `(progn
+     ,@(mapcar (lambda (command)
+                 `(defadvice ,command
+                      (,class ,(intern (format "%S-%s" command advice-name))
+                              activate)
+                    ,@body))
+               commands)))
 
 (defun disable-electric-indent-mode ()
   (if (fboundp 'electric-indent-local-mode)
@@ -869,28 +861,98 @@ If ASCII si not provided then UNICODE is used instead."
   "Return the line at point as a string."
   (buffer-substring (line-beginning-position) (line-end-position)))
 
-(defun spacemacs/toggle-tool-bar ()
-  "Toggle the tool bar.
-It has no effect in a terminal."
-  (interactive)
-  (when window-system
-    (tool-bar-mode (if tool-bar-mode -1 1))))
-
-(defun spacemacs/toggle-menu-bar ()
-  "Toggle the menu bar.
-It has no effect in a terminal if the Emacs version is < `24.4'."
-  (interactive)
-  (when (or window-system
-            (version<= "24.3.1" emacs-version))
-    (menu-bar-mode (if menu-bar-mode -1 1))))
-
 (defun spacemacs/open-in-external-app ()
   "Open current file in external application."
   (interactive)
-  (let ((file-path (buffer-file-name)))
+  (let ((file-path (if (eq major-mode 'dired-mode)
+                       (dired-get-file-for-visit)
+                     (buffer-file-name))))
     (cond
-     ((system-is-mswindows) (w32-shell-execute "open" (replace-regexp-in-string "/" "\\" file-path)))
+     ((system-is-mswindows) (w32-shell-execute "open" (replace-regexp-in-string "/" "\\\\" file-path)))
      ((system-is-mac) (shell-command (format "open \"%s\"" file-path)))
      ((system-is-linux) (let ((process-connection-type nil))
-                          (start-process "" nil "xdg-open" file-path)))
-     )))
+                          (start-process "" nil "xdg-open" file-path))))))
+
+(defun spacemacs/next-error (&optional n reset)
+  "Dispatch to flycheck or standard emacs error."
+  (interactive "P")
+  (if (and (boundp 'flycheck-mode)
+           (symbol-value flycheck-mode))
+      (call-interactively 'flycheck-next-error)
+    (call-interactively 'next-error)))
+
+(defun spacemacs/previous-error (&optional n reset)
+  "Dispatch to flycheck or standard emacs error."
+  (interactive "P")
+  (if (and (boundp 'flycheck-mode)
+           (symbol-value flycheck-mode))
+      (call-interactively 'flycheck-previous-error)
+    (call-interactively 'previous-error)))
+
+(defun switch-to-minibuffer-window ()
+  "switch to minibuffer window (if active)"
+  (interactive)
+  (when (active-minibuffer-window)
+    (select-window (active-minibuffer-window))))
+
+(defun comint-clear-buffer ()
+  (interactive)
+  (let ((comint-buffer-maximum-size 0))
+    (comint-truncate-buffer)))
+
+;; http://stackoverflow.com/a/10216338/4869
+(defun copy-whole-buffer-to-clipboard ()
+  "Copy entire buffer to clipboard"
+  (interactive)
+  (clipboard-kill-ring-save (point-min) (point-max)))
+
+
+(defun copy-clipboard-to-whole-buffer ()
+  "Copy clipboard and replace buffer"
+  (interactive)
+  (delete-region (point-min) (point-max))
+  (clipboard-yank)
+  (deactivate-mark))
+
+;; indent on paste
+;; from Prelude: https://github.com/bbatsov/prelude
+(defun yank-advised-indent-function (beg end)
+  "Do indentation, as long as the region isn't too large."
+  (if (<= (- end beg) spacemacs-yank-indent-threshold)
+      (indent-region beg end nil)))
+
+;; hide mode line
+;; from http://bzg.fr/emacs-hide-mode-line.html
+(defvar-local hidden-mode-line-mode nil)
+(define-minor-mode hidden-mode-line-mode
+  "Minor mode to hide the mode-line in the current buffer."
+  :init-value nil
+  :global t
+  :variable hidden-mode-line-mode
+  :group 'editing-basics
+  (if hidden-mode-line-mode
+      (setq hide-mode-line mode-line-format
+            mode-line-format nil)
+    (setq mode-line-format hide-mode-line
+          hide-mode-line nil))
+  (force-mode-line-update)
+  ;; Apparently force-mode-line-update is not always enough to
+  ;; redisplay the mode-line
+  (redraw-display)
+  (when (and (called-interactively-p 'interactive)
+             hidden-mode-line-mode)
+    (run-with-idle-timer
+     0 nil 'message
+     (concat "Hidden Mode Line Mode enabled.  "
+             "Use M-x hidden-mode-line-mode to make the mode-line appear."))))
+
+(spacemacs|advise-commands
+ "indent" (yank yank-pop evil-paste-before evil-paste-after) after
+ "If current mode is not one of spacemacs-indent-sensitive-modes
+ indent yanked text (with universal arg don't indent)."
+ (if (and (not (equal '(4) (ad-get-arg 0)))
+          (not (member major-mode spacemacs-indent-sensitive-modes))
+          (or (derived-mode-p 'prog-mode)
+              (member major-mode spacemacs-indent-sensitive-modes)))
+     (let ((transient-mark-mode nil))
+       (yank-advised-indent-function (region-beginning) (region-end)))))

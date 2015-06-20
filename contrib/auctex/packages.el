@@ -1,30 +1,25 @@
-(defvar auctex-packages
+(setq auctex-packages
   '(
     auctex
+    company
+    company-auctex
     evil-matchit
+    flycheck
     ))
-
-(when (member 'company-mode dotspacemacs-configuration-layers)
-  (add-to-list 'auctex-packages 'company-auctex))
 
 (defun auctex/init-auctex ()
   (use-package tex
     :defer t
     :config
     (progn
-      (when (member 'company-mode dotspacemacs-configuration-layers)
-        (use-package company-auctex
-          :init (company-auctex-init)))
-
       (defun auctex/build-view ()
         (interactive)
-        (if (buffer-modified-p)
-            (progn
-              (let ((TeX-save-query nil))
-                (TeX-save-document (TeX-master-file)))
-              (setq build-proc (TeX-command "LaTeX" 'TeX-master-file -1))
-              (set-process-sentinel  build-proc  'auctex/build-sentinel))
-          (TeX-view)))
+        (progn
+          (let ((TeX-save-query nil))
+            (TeX-save-document (TeX-master-file)))
+          (setq build-proc (TeX-command "LaTeX" 'TeX-master-file -1))
+          (set-process-sentinel  build-proc  'auctex/build-sentinel))
+        (TeX-view))
 
       (defun auctex/build-sentinel (process event)
         (if (string= event "finished\n")
@@ -33,6 +28,7 @@
 
       (add-hook 'LaTeX-mode-hook '(lambda () (local-set-key (kbd "H-r") 'auctex/build-view)))
       (add-hook 'LaTeX-mode-hook 'flyspell-mode)
+      (add-hook 'LaTeX-mode-hook 'company-mode)
       (add-hook 'LaTeX-mode-hook 'LaTeX-math-mode)
       (add-hook 'LaTeX-mode-hook 'spacemacs/load-yasnippet)
 
@@ -60,8 +56,26 @@
 
       (setq-default TeX-auto-save t)
       (setq-default TeX-parse-self t)
-      (setq-default TeX-master nil)
       (setq-default TeX-PDF-mode t))))
 
-(defun auctex/init-evil-matchit ()
-  (add-hook 'web-mode-hook 'evil-matchit-mode))
+
+(defun auctex/post-init-evil-matchit ()
+  (add-hook 'LaTeX-mode-hook 'evil-matchit-mode))
+
+(defun python/post-init-flycheck ()
+  (add-hook 'LaTeX-mode-hook 'flycheck-mode))
+
+(when (configuration-layer/layer-usedp 'auto-completion)
+  (defun auctex/post-init-company ()
+    (spacemacs|add-company-hook LaTeX-mode))
+
+  (defun auctex/init-company-auctex ()
+    (use-package company-auctex
+      :if (configuration-layer/package-usedp 'company)
+      :defer t
+      :init
+      (progn
+        (push 'company-auctex-labels company-backends-LaTeX-mode)
+        (push 'company-auctex-bibs company-backends-LaTeX-mode)
+        (push '(company-auctex-macros company-auctex-symbols company-auctex-environments)
+              company-backends-LaTeX-mode)))))

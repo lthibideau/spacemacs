@@ -9,29 +9,19 @@
 ;; This file is not part of GNU Emacs.
 ;;
 ;;; License: GPLv3
-(defconst spacemacs-version     "0.48.7" "Spacemacs version.")
-(defconst spacemacs-min-version   "24.3" "Mininal required version of Emacs.")
+(defconst spacemacs-version          "0.102.2" "Spacemacs version.")
+(defconst spacemacs-emacs-min-version   "24.3" "Minimal version of Emacs.")
 
 (defun spacemacs/emacs-version-ok ()
-  (version<= spacemacs-min-version emacs-version))
+  (version<= spacemacs-emacs-min-version emacs-version))
 
 (when (spacemacs/emacs-version-ok)
-  (add-to-list 'load-path (concat user-emacs-directory "core/"))
-  (require 'spacemacs-mode)
-  (require 'configuration-layer)
-  (dotspacemacs/load)
-  (spacemacs/initialize)
-  ;; Initializing configuration from ~/.spacemacs
-  (dotspacemacs|call-func dotspacemacs/init)
-  ;; synchronize and load configuration layers
-  (configuration-layer/declare-layers)
-  (configuration-layer/load-layers)
-  (configuration-layer/delete-orphan-packages)
-  ;; Ultimate configuration decisions are given to the user who can defined
-  ;; them in his/her ~/.spacemacs file
-  (dotspacemacs|call-func dotspacemacs/config)
-  (configuration-layer/setup-after-init-hook)
-  ;; start a server for subsequent emacs clients
+  (load-file (concat user-emacs-directory "core/core-load-paths.el"))
+  (require 'core-spacemacs)
+  (require 'core-configuration-layer)
+  (spacemacs/init)
+  (configuration-layer/sync)
+  (spacemacs/setup-after-init-hook)
+  (spacemacs/maybe-install-dotfile)
   (require 'server)
-  (unless (server-running-p)
-    (server-start)))
+  (unless (server-running-p) (server-start)))

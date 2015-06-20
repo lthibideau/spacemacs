@@ -10,9 +10,7 @@
 ;;
 ;;; License: GPLv3
 
-(defvar smex-packages '(smex)
-  "List of all packages to install and/or initialize. Built-in packages
-which require an initialization must be listed explicitly in the list.")
+(setq smex-packages '(smex))
 
 (defun smex/init-smex ()
   (use-package smex
@@ -26,29 +24,19 @@ which require an initialization must be listed explicitly in the list.")
       (defun spacemacs/smex ()
         "Execute smex with a better prompt."
         (interactive)
-        (let ((smex-prompt-string "Emacs commands:"))
+        (let ((smex-prompt-string "Emacs commands: "))
           (smex)))
 
       (defun spacemacs/smex-major-mode-commands ()
         "Reexecute smex with major mode commands only."
         (interactive)
-        (let ((smex-prompt-string (format "%s commands:" major-mode)))
+        (let ((smex-prompt-string (format "%s commands: " major-mode)))
           (smex-major-mode-commands)))
 
-      (defun spacemacs/smex-define-keys ()
-        (when dotspacemacs-feature-toggle-leader-on-jk
-          (evil-leader/set-key-for-mode 'ido-mode
-            "g"   'smex-find-function
-            "hdf" 'smex-describe-function
-            "hw"  'smex-where-is))
-        ;; (key-chord-define ido-completion-map (kbd "jk")
-        ;;                   (cdr (assoc 'ido-mode evil-leader--mode-maps)))
-        )
-
-      (evil-leader/set-key dotspacemacs-command-key 'spacemacs/smex)
+      ;; define the key binding at the very end in order to allow the user
+      ;; to overwrite any key binding
+      (add-hook 'after-init-hook
+                (lambda () (evil-leader/set-key dotspacemacs-command-key
+                             'spacemacs/smex)))
       (evil-leader/set-key "m:" 'spacemacs/smex-major-mode-commands)
-      (global-set-key (kbd "M-x") 'smex)
-      (global-set-key (kbd "M-X") 'smex)
-      (add-to-list 'ido-setup-hook 'spacemacs/smex-define-keys)
-      )
-    ))
+      (global-set-key (kbd "M-x") 'spacemacs/smex)))) 

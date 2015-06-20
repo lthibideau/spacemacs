@@ -10,12 +10,13 @@
 ;;
 ;;; License: GPLv3
 
-(defvar themes-megapack-packages
+(setq themes-megapack-packages
   '(
     afternoon-theme
     alect-themes
     ample-theme
     ample-zen-theme
+    apropospriate-theme
     anti-zenburn-theme
     ;; contains errors
     ; badger-theme
@@ -26,18 +27,19 @@
     clues-theme
     color-theme-sanityinc-solarized
     color-theme-sanityinc-tomorrow
-    color-theme-solarized
     colorsarenice-theme
     cyberpunk-theme
     dakrone-theme
     darkburn-theme
     darkmine-theme
+    darktooth-theme
     django-theme
     espresso-theme
     firebelly-theme
     flatland-theme
     flatui-theme
     gandalf-theme
+    gotham-theme
     grandshell-theme
     gruber-darker-theme
     gruvbox-theme
@@ -46,13 +48,14 @@
     heroku-theme
     inkpot-theme
     ir-black-theme
+    jazz-theme
     leuven-theme
     light-soap-theme
     lush-theme
+    material-theme
     minimal-theme
     moe-theme
     molokai-theme
-    monokai-theme
     monochrome-theme
     mustang-theme
     naquadah-theme
@@ -96,10 +99,8 @@
     zen-and-art-theme
     zenburn-theme
     zonokai-theme
-    )
-  "List of all packages to install and/or initialize. Built-in packages
-which require an initialization must be listed explicitly in the list.")
+    ))
 
-(defvar themes-megapack-excluded-packages '()
-  "List of packages to exclude.")
-
+;; programmatically defin the init functions
+(dolist (pkg themes-megapack-packages)
+  (eval `(defun ,(intern (format "themes-megapack/init-%S" pkg)) nil)))
